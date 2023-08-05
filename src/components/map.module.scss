@@ -1,0 +1,29 @@
+.carIcon {
+  svg {
+    width: 100%;
+    height: 100%;
+    //background-color: rgba(255, 255, 255, 0.3);
+    border-radius: 5px;
+    path{stroke: rgb(64, 255, 0);fill:rgb(29, 115, 0);}
+  }
+}
+
+.flagIcon {
+  svg {
+    width: 100%;
+    height: 100%;
+    //background-color: rgba(255, 255, 255, 0.3);
+    border-radius: 5px;
+    path{stroke: rgb(255, 154, 148);fill:rgb(255, 0, 0);}
+  }
+}
+
+.barrierIcon {
+  svg {
+    width: 100%;
+    height: 100%;
+    //background-color: rgba(255, 255, 255, 0.3);
+    border-radius: 5px;
+    path{stroke: rgb(0, 0, 0);fill:rgb(255, 255, 255);}
+  }
+}
