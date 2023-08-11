@@ -20,12 +20,32 @@ const createOSMTileLayer = () => {
   });
 };
 
+const createCurrentPosMarker = (position) => {
+  var marker = new L.Marker(position);
+  var icon = L.icon({
+    iconUrl: "/marker-icon.png",
+    iconSize: [25, 41],
+    iconAnchor: [12.5, 41],
+  });
+
+  marker.setIcon(icon);
+
+  return marker;
+};
+
 export default function Map(props) {
   useEffect(() => {
-    var mapContainer = createMap().setView([51.505, -0.09], 13);
-    var tileLayer = createOSMTileLayer();
+    // Leaflet uses the following format for cosordinates [ height/latitude,  width/longitude ]
 
+    const initialPosition = [51.505, -0.09];
+    const initialZoom = 13;
+
+    var mapContainer = createMap().setView(initialPosition, initialZoom);
+    var tileLayer = createOSMTileLayer();
     tileLayer.addTo(mapContainer);
+
+    var currentPositionMarker = createCurrentPosMarker(initialPosition);
+    currentPositionMarker.addTo(mapContainer);
   });
 
   return <div id="map" {...props} />;
