@@ -1,12 +1,9 @@
 import requests
-
+import sklearn
+import osmnx as ox
+import networkx as nx
+import shapely
 from flask import Flask, request, jsonify, make_response, Response, Request
-
-from scipy import spatial
-import numpy as np
-import math as mt
-
-from decimal import Decimal
 
 
 def _build_cors_preflight_response():
@@ -17,117 +14,125 @@ def _build_cors_preflight_response():
     return response
 
 
-#   TO REMEMBER:
-#       - latitude means height
-#       - longitude means width
-#
-
-x = 0
-y = 1
-
-longitude = x
-latitude = y
+G = ox.load_graphml(filepath='geodata/graph_ml.osm')
 
 
-def inverseLngLat(vector_of_coords):
-
-    resulting_vector = []
-
-    for coord in vector_of_coords:
-        #   LatLng for Leaflet.js
-        resulting_vector.append([coord[latitude], coord[longitude]])
-
-    return resulting_vector
+def getNode(id): return G.nodes[id]
 
 
-def transformPointsToAPIQueryString(points):
-
-    points_argument = ""
-
-    for count, point in enumerate(points):
-        points_argument += f"{point[longitude]},{point[latitude]}"
-        if count != len(points) - 1:
-            points_argument += ";"
-
-    return points_argument
+def getEdge(start, end):
+    return G[start][end][0]
 
 
-def makeOSMRApiCall(points):
-
-    points_argument = transformPointsToAPIQueryString(points)
-
-    query = f"https://router.project-osrm.org/route/v1/driving/{points_argument}?overview=false&steps=true&geometries=geojson"
-
-    osmr_path = requests.get(query).json()["routes"][0]["legs"][0]["steps"]
-    return osmr_path
+def transformNodeToCoords(node): return [node['y'], node['x']]
+def transformToupleToCoords(touple): return [touple[1], touple[0]]
 
 
-def extractPathFromOSMRApi(osmr_path):
-
+def extractPathCoordinates(nx_path):
     path = []
 
-    for path_section in osmr_path:
-        segment_coords = path_section['geometry']['coordinates']
-        for coord in segment_coords:
-            path.append(coord)
+    for count, id in enumerate(nx_path[:-1]):
+        current_node = id
+        next_node = nx_path[count+1]
+
+        edge = getEdge(current_node, next_node)
+
+        if 'geometry' in edge:
+            geometry = shapely.geometry.LineString(edge['geometry'])
+            touple_coords_array = list(geometry.coords)
+
+            for pair in touple_coords_array:
+                path.append(transformToupleToCoords(pair))
+
+        else:
+            node = getNode(next_node)
+            path.append(transformNodeToCoords(node))
 
     return path
 
 
-def distanceBetween(a, b):
-    return ((b[x]-a[x])**2+(b[y]-a[y])**2)**0.5
+def findClosestNodeToCoords(
+    coords): return ox.nearest_nodes(G, coords[0], coords[1])
 
 
-def distanceOfPointToLine(point, line_start, line_end):
-    
-    point=np.asfarray(point)
-    line_start=np.asfarray(line_start)
-    line_end=np.asfarray(line_end)
-    
-    return np.abs(np.cross(line_end-line_start, line_start-point)) / np.linalg.norm(line_end-line_start)
+def findClosestEdgeToCoords(
+    coords): return ox.nearest_edges(G, coords[0], coords[1])
 
 
-def findBarriersThatIntersectPath(path, barrier_cooordinates):
+graph_saved_edges = []
+removed_edges = []
 
-    unique_intersected_barriers = set()
 
-    nearest_vector_tree = spatial.KDTree(barrier_cooordinates)
+def applyBarriersToGraph(barriers):
 
-    for index, coord in enumerate(path[:-1]):
+    print("---APPLYING BARRIERS---")
+    for barrier in barriers:
+        edge_from_graph = findClosestEdgeToCoords([barrier[1], barrier[0]])
+        source = edge_from_graph[0]
+        target = edge_from_graph[1]
+        edge = G[source][target][0]
+
+        modified_edge = {
+            'source': source,
+            'target': target,
+            'travel_time': edge['travel_time']
+        }
+
+        graph_saved_edges.append(modified_edge)
+
+        source_node = getNode(source)
+        target_node = getNode(target)
+
+        removed_edges.append([[source_node['y'], source_node['x']], [
+                             target_node['y'], target_node['x']]])
+
+        try: G.remove_edge(source, target)
+        except: pass
         
-        next_coord = path[index+1]
-        line_length = distanceBetween(coord, next_coord)
-        [neighbor_distance, neighbor_index] = nearest_vector_tree.query_ball_point(
-            [coord, next_coord], r=line_length)
+        try: G.remove_edge(target,source)
+        except: pass
+        
+        print("REMOVED EDGE: ", G[source])
 
-        distance_index_pair = zip(neighbor_distance, neighbor_index)
-
-        for barrier_distance, barrier_index in distance_index_pair:
-            barrier = barrier_cooordinates[barrier_index]
-
-            if distanceOfPointToLine(barrier,coord,next_coord)<0.00002:
-                unique_intersected_barriers.add(barrier_index)
-
-    return list(unique_intersected_barriers)
+    print("---BARRIERS APPLIED---")
+    return
 
 
-def FindShortestPath(points, barrier_coordinates):
+def removeBarriersFromGraph():
 
-    api_result = makeOSMRApiCall(points)
+    for edge_save in graph_saved_edges:
+        source = edge_save['source']
+        target = edge_save['target']
+        travel_time = edge_save['travel_time']
 
-    path = extractPathFromOSMRApi(api_result)
+        G[source][target][0]['travel_time'] = travel_time
 
-    intersected_barriers = findBarriersThatIntersectPath(
-        path, barrier_coordinates)
+    return
 
-    return {'route': inverseLngLat(path), 'intersected_barriers': intersected_barriers}
+
+def FindShortestPath(points):
+
+    first_point = points[0]
+    last_point = points[-1]
+
+    source = findClosestNodeToCoords(first_point)
+    target = findClosestNodeToCoords(last_point)
+
+    nx_id_path = nx.shortest_path(G, source, target, 'travel_time')
+
+    nx_path = extractPathCoordinates(nx_id_path)
+    return {'route': nx_path}
 
 
 app = Flask(__name__)
 
+barriers = [[44.440682029393905, 26.11030697822571],
+            [44.44543877546804, 26.10357999801636],
+            [44.43469916282961, 26.098258495330814]]
+
 
 @app.route("/router", methods=["OPTIONS", "POST"])
-def hello_world():
+def routeEngine():
     if request.method == "OPTIONS":
         return _build_cors_preflight_response()
     elif request.method == "POST":
@@ -136,7 +141,29 @@ def hello_world():
 
         if (content_type == 'application/json'):
             data = FindShortestPath(
-                request.json['points'], request.json['barriers'])
+                request.json['points'])
+
+        json = jsonify(data)
+
+        response = make_response(json)
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.mimetype = 'application/json'
+
+        return response
+    else:
+        raise RuntimeError(
+            "Weird - don't know how to handle method {}".format(request.method))
+
+
+@app.route("/barriers", methods=["OPTIONS", "GET"])
+def sendBarriers():
+    if request.method == "OPTIONS":
+        return _build_cors_preflight_response()
+    elif request.method == "GET":
+
+        data = {}
+        data['barriers'] = barriers
+        data['removed_edges'] = removed_edges
 
         json = jsonify(data)
 
@@ -151,4 +178,5 @@ def hello_world():
 
 
 if __name__ == "__main__":
+    applyBarriersToGraph(barriers)
     app.run()
