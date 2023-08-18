@@ -55,45 +55,41 @@ def findClosestNodeToCoords(
     coords): return ox.nearest_nodes(G, coords[0], coords[1])
 
 
-def findClosestEdgeToCoords(
-    coords): return ox.nearest_edges(G, coords[0], coords[1])
+def findClosestEdgeToCoords(coords):
+    
+    (longitude, latitude) = coords    
+    edge = ox.nearest_edges(
+        G, longitude, latitude, return_dist=True)
+
+    return edge
 
 
 graph_saved_edges = []
 removed_edges = []
 
-
 def applyBarriersToGraph(barriers):
 
     print("---APPLYING BARRIERS---")
     for barrier in barriers:
-        edge_from_graph = findClosestEdgeToCoords([barrier[1], barrier[0]])
-        source = edge_from_graph[0]
-        target = edge_from_graph[1]
-        edge = G[source][target][0]
+        (longitude, latitude) = barrier
+         
+        while True:
+            (edge, distance) = findClosestEdgeToCoords([latitude,longitude])
+            if distance > 0.0005: break;
+            
+            print(distance)
+            (source, target, option) = edge
+            source_node = getNode(source); target_node = getNode(target);
 
-        modified_edge = {
-            'source': source,
-            'target': target,
-            'travel_time': edge['travel_time']
-        }
+            removed_edges.append([[source_node['y'], source_node['x']], [
+                                target_node['y'], target_node['x']]])
 
-        graph_saved_edges.append(modified_edge)
-
-        source_node = getNode(source)
-        target_node = getNode(target)
-
-        removed_edges.append([[source_node['y'], source_node['x']], [
-                             target_node['y'], target_node['x']]])
-
-        try: G.remove_edge(source, target)
-        except: pass
-        
-        try: G.remove_edge(target,source)
-        except: pass
-        
-        print("REMOVED EDGE: ", G[source])
-
+            try: G.remove_edge(source, target)
+            except: pass;
+            
+            try: G.remove_edge(target, source)
+            except: pass;
+            
     print("---BARRIERS APPLIED---")
     return
 
