@@ -72,10 +72,11 @@ def applyBarriersToGraph(barriers):
     print("---APPLYING BARRIERS---")
     for barrier in barriers:
         (longitude, latitude) = barrier
-         
+        MAX_BARRIER_DISTANCE = 0.000015
+        
         while True:
             (edge, distance) = findClosestEdgeToCoords([latitude,longitude])
-            if distance > 0.0005: break;
+            if distance > MAX_BARRIER_DISTANCE: break;
             
             print(distance)
             (source, target, option) = edge
@@ -124,7 +125,8 @@ app = Flask(__name__)
 
 barriers = [[44.440682029393905, 26.11030697822571],
             [44.44543877546804, 26.10357999801636],
-            [44.43469916282961, 26.098258495330814]]
+            [44.43469916282961, 26.098258495330814],
+            [44.44737085357723,26.105878651142124]]
 
 
 @app.route("/router", methods=["OPTIONS", "POST"])

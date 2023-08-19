@@ -143,7 +143,7 @@ const renderBarriers = async (map) => {
   const { barriers, removed_edges } = request;
 
   removed_edges.map((coords_pair) => {
-    const polyline = L.polyline([coords_pair],{color:"red",weight: 10});
+    const polyline = L.polyline([coords_pair],{color:"red",weight: 4});
     polyline.addTo(map);
   });
 
