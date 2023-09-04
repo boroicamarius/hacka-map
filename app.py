@@ -1,9 +1,14 @@
 import requests
 import sklearn
+import pprint
 import osmnx as ox
 import networkx as nx
+import threading
 import shapely
 from flask import Flask, request, jsonify, make_response, Response, Request
+
+mutex = threading.Lock()
+pp = pprint.PrettyPrinter(indent=4)
 
 
 def _build_cors_preflight_response():
@@ -18,7 +23,6 @@ G = ox.load_graphml(filepath='geodata/graph_ml.osm')
 
 
 def getNode(id): return G.nodes[id]
-
 
 def getEdge(start, end):
     return G[start][end][0]
@@ -56,8 +60,8 @@ def findClosestNodeToCoords(
 
 
 def findClosestEdgeToCoords(coords):
-    
-    (longitude, latitude) = coords    
+
+    (longitude, latitude) = coords
     edge = ox.nearest_edges(
         G, longitude, latitude, return_dist=True)
 
@@ -67,43 +71,38 @@ def findClosestEdgeToCoords(coords):
 graph_saved_edges = []
 removed_edges = []
 
+
 def applyBarriersToGraph(barriers):
 
     print("---APPLYING BARRIERS---")
     for barrier in barriers:
         (longitude, latitude) = barrier
         MAX_BARRIER_DISTANCE = 0.000015
-        
+
         while True:
-            (edge, distance) = findClosestEdgeToCoords([latitude,longitude])
-            if distance > MAX_BARRIER_DISTANCE: break;
-            
+            (edge, distance) = findClosestEdgeToCoords([latitude, longitude])
+            if distance > MAX_BARRIER_DISTANCE:
+                break
+
             print(distance)
             (source, target, option) = edge
-            source_node = getNode(source); target_node = getNode(target);
+            source_node = getNode(source)
+            target_node = getNode(target)
 
             removed_edges.append([[source_node['y'], source_node['x']], [
-                                target_node['y'], target_node['x']]])
+                target_node['y'], target_node['x']]])
 
-            try: G.remove_edge(source, target)
-            except: pass;
-            
-            try: G.remove_edge(target, source)
-            except: pass;
-            
+            try:
+                G.remove_edge(source, target)
+            except:
+                pass
+
+            try:
+                G.remove_edge(target, source)
+            except:
+                pass
+
     print("---BARRIERS APPLIED---")
-    return
-
-
-def removeBarriersFromGraph():
-
-    for edge_save in graph_saved_edges:
-        source = edge_save['source']
-        target = edge_save['target']
-        travel_time = edge_save['travel_time']
-
-        G[source][target][0]['travel_time'] = travel_time
-
     return
 
 
@@ -126,53 +125,90 @@ app = Flask(__name__)
 barriers = [[44.440682029393905, 26.11030697822571],
             [44.44543877546804, 26.10357999801636],
             [44.43469916282961, 26.098258495330814],
-            [44.44737085357723,26.105878651142124]]
+            [44.44737085357723, 26.105878651142124]]
+
+# TODO: implement decorators
 
 
-@app.route("/router", methods=["OPTIONS", "POST"])
-def routeEngine():
+def makeCORSRequest(method, processing_function):
     if request.method == "OPTIONS":
         return _build_cors_preflight_response()
-    elif request.method == "POST":
-        content_type = request.headers.get('Content-Type')
-        data = {}
+    elif request.method == method:
 
-        if (content_type == 'application/json'):
+        data = processing_function(request)
+        json = jsonify(data)
+
+        response = make_response(json)
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.mimetype = 'application/json'
+
+        return response
+    else:
+        raise RuntimeError(
+            "Weird - don't know how to handle method {}".format(request.method))
+
+
+def routeEngine(request):
+    content_type = request.headers.get('Content-Type')
+    data = {}
+
+    if (content_type == 'application/json'):
+        with mutex:
             data = FindShortestPath(
                 request.json['points'])
 
-        json = jsonify(data)
+    return data
 
-        response = make_response(json)
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        response.mimetype = 'application/json'
 
-        return response
-    else:
-        raise RuntimeError(
-            "Weird - don't know how to handle method {}".format(request.method))
+@app.route("/router", methods=["OPTIONS", "POST"])
+def routePath():
+    return makeCORSRequest("POST", routeEngine)
+
+
+def returnBarriers(request):
+    data = {}
+    data['barriers'] = barriers
+    data['removed_edges'] = removed_edges
+
+    return data
 
 
 @app.route("/barriers", methods=["OPTIONS", "GET"])
-def sendBarriers():
-    if request.method == "OPTIONS":
-        return _build_cors_preflight_response()
-    elif request.method == "GET":
+def barriersPath():
+    return makeCORSRequest("GET", returnBarriers)
 
-        data = {}
-        data['barriers'] = barriers
-        data['removed_edges'] = removed_edges
 
-        json = jsonify(data)
+def extractKeysFromDict(dict, keys_array):
+    return {key: dict.get(key) for key in keys_array}
 
-        response = make_response(json)
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        response.mimetype = 'application/json'
 
-        return response
-    else:
-        raise RuntimeError(
-            "Weird - don't know how to handle method {}".format(request.method))
+def transformJamsToModifications(jams):
+    keys = ['length',
+            'level',
+            'line',
+            'segments',
+            'severity',
+            'speed']
+
+    packets = [extractKeysFromDict(jam, keys) for jam in jams]
+    return packets
+
+def reloadGraph():
+    return
+
+def setWazeDataToGraph(request):
+    jams = request.json['jams']
+    packets = transformJamsToModifications(jams)
+    
+    with mutex:
+        
+        data = {'status': 'success'}
+        return data
+
+
+@app.route("/waze", methods=["OPTIONS", "POST"])
+def wazePath():
+    return makeCORSRequest("POST", setWazeDataToGraph)
 
 
 if __name__ == "__main__":
